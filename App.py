@@ -43,6 +43,20 @@ cursor.execute('''
     )
 ''')
 
+# Safe migration for inventory table columns if missing
+inv_columns = [
+    ("medicine_name", "TEXT"),
+    ("med_type", "TEXT"),
+    ("stock_qty", "INTEGER"),
+    ("price", "REAL")
+]
+for col_name, col_type in inv_columns:
+    try:
+        cursor.execute(f"ALTER TABLE inventory ADD COLUMN {col_name} {col_type}")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS bills (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,23 +89,37 @@ if 'username' not in st.session_state:
 if 'nav_page' not in st.session_state:
     st.session_state.nav_page = "Dashboard"
 
-# ----------------- GLOBAL MEDICAL THEME BACKGROUND -----------------
+# ----------------- GLOBAL MEDICAL THEME & EXPANDED SPACING CSS -----------------
 st.markdown("""
     <style>
     .stApp {
-        background: linear-gradient(135deg, rgba(240, 247, 244, 0.92) 0%, rgba(232, 245, 233, 0.92) 100%), 
+        background: linear-gradient(135deg, rgba(240, 247, 244, 0.94) 0%, rgba(232, 245, 233, 0.94) 100%), 
                           url('https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?q=80&w=1920&auto=format&fit=crop');
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
+    }
+    .block-container {
+        padding-top: 3rem !important;
+        padding-bottom: 5rem !important;
+        padding-left: 3rem !important;
+        padding-right: 3rem !important;
+        max-width: 100% !important;
+    }
+    div.stButton > button {
+        width: 100%;
+        border-radius: 6px;
+        font-weight: 600;
+        padding-top: 0.5rem;
+        padding-bottom: 0.5rem;
     }
     </style>
 """, unsafe_allow_html=True)
 
 # ----------------- AUTHENTICATION SYSTEM -----------------
 if not st.session_state.logged_in:
-    st.markdown("<h1 style='text-align: center; color: #1b5e20;'>🌿 Panwar Homoeopathic Clinic & Pharmacy</h1>", unsafe_allow_html=True)
-    st.markdown("<h4 style='text-align: center; color: #2e7d32;'>Advanced Digital Management & Prescription Portal</h4>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #1b5e20; padding-top: 2rem;'>🌿 Panwar Homoeopathic Clinic & Pharmacy</h1>", unsafe_allow_html=True)
+    st.markdown("<h4 style='text-align: center; color: #2e7d32; padding-bottom: 1.5rem;'>Advanced Digital Management & Prescription Portal</h4>", unsafe_allow_html=True)
     
     tab1, tab2 = st.tabs(["🔐 Secure Login", "📝 Register New User"])
     
