@@ -1,7 +1,8 @@
-import sqlite3
 from datetime import datetime
+import sqlite3
 import streamlit as st
 import pandas as pd
+import urllib.parse
 
 # Database connection setup
 conn = sqlite3.connect("clinic_data.db", check_same_thread=False)
@@ -185,7 +186,6 @@ else:
         
         selected_pat = st.selectbox("Select Registered Patient", patient_options)
         
-        # Fetch inventory for medicine dropdowns
         cursor.execute("SELECT medicine_name FROM inventory")
         inv_meds = [row[0] for row in cursor.fetchall()]
         if not inv_meds:
@@ -223,15 +223,10 @@ else:
                 conn.commit()
                 st.success("Bill saved successfully!")
                 
-                # WhatsApp message link generator
                 wa_msg = f"Hello {p_name_ext}, Thanks for visiting the Panwar Clinic. Your total bill amount is ₹{total_amount:.2f}. Get well soon!"
-                wa_url = f"https://wa.me/91{p_phone_ext}?text={urllib.parse.quote(wa_msg)}" if 'urllib' else "#"
-                
-                import urllib.parse
                 wa_url = f"https://wa.me/91{p_phone_ext}?text={urllib.parse.quote(wa_msg)}"
                 st.markdown(f"📲 [Click here to send WhatsApp message to Patient]({wa_url})", unsafe_allow_html=True)
                 
-                # Printable Bill Invoice View / PDF option simulation
                 st.markdown("---")
                 st.markdown(f"### 🧾 Panwar Homoeopathic Clinic Invoice")
                 st.write(f"**Patient Name:** {p_name_ext}")
@@ -298,19 +293,30 @@ else:
         else:
             st.info("Inventory is empty.")
 
-    # 6. PATIENT HISTORY & TRACKING
+    # 6. PATIENT HISTORY & TRACKING (Safely handled with safe index checking)
     elif page == "History":
         st.markdown("### 📂 Patient Medical History & Tracking")
         search_q = st.text_input("🔍 Search Patient by Name or Mobile")
         if search_q:
-            cursor.execute("SELECT * FROM patients WHERE name LIKE ? OR phone LIKE ?", (f"%{search_q}%", f"%{search_q}%"))
+            cursor.execute("SELECT id, name, age, gender, phone, address, treatment_history, complaints, thermal, modalities, created_at FROM patients WHERE name LIKE ? OR phone LIKE ?", (f"%{search_q}%", f"%{search_q}%"))
         else:
-            cursor.execute("SELECT * FROM patients ORDER BY id DESC")
+            cursor.execute("SELECT id, name, age, gender, phone, address, treatment_history, complaints, thermal, modalities, created_at FROM patients ORDER BY id DESC")
         patients = cursor.fetchall()
         
         if patients:
             for row in patients:
-                p_id, p_name, p_age, p_gender, p_phone, p_address, p_hist, p_comp, p_therm, p_mod, p_date = row
+                p_id = row[0]
+                p_name = row[1] if len(row) > 1 and row[1] else "N/A"
+                p_age = row[2] if len(row) > 2 and row[2] else "N/A"
+                p_gender = row[3] if len(row) > 3 and row[3] else "N/A"
+                p_phone = row[4] if len(row) > 4 and row[4] else "N/A"
+                p_address = row[5] if len(row) > 5 and row[5] else "N/A"
+                p_hist = row[6] if len(row) > 6 and row[6] else "N/A"
+                p_comp = row[7] if len(row) > 7 and row[7] else "N/A"
+                p_therm = row[8] if len(row) > 8 and row[8] else "N/A"
+                p_mod = row[9] if len(row) > 9 and row[9] else "N/A"
+                p_date = row[10] if len(row) > 10 and row[10] else "N/A"
+
                 with st.expander(f"👤 {p_name} | 📱 {p_phone} | Age: {p_age} | Added: {p_date}"):
                     st.write(f"**Address:** {p_address}")
                     st.write(f"**Previous Treatment History:** {p_hist}")
