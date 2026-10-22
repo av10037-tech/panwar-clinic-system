@@ -1,5 +1,5 @@
-from datetime import datetime
 import sqlite3
+from datetime import datetime, timedelta
 import streamlit as st
 import pandas as pd
 import urllib.parse
@@ -49,11 +49,21 @@ cursor.execute('''
         patient_name TEXT,
         phone TEXT,
         medicines TEXT,
+        days_supply INTEGER,
+        next_visit_date TEXT,
         total_amount REAL,
         bill_date TEXT
     )
 ''')
 conn.commit()
+
+# Safe migration for bills table if columns are missing
+for col_def in [("days_supply", "INTEGER"), ("next_visit_date", "TEXT")]:
+    try:
+        cursor.execute(f"ALTER TABLE bills ADD COLUMN {col_def[0]} {col_def[1]}")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
 
 st.set_page_config(page_title="Panwar Homoeopathic Clinic & Pharmacy", page_icon="🌿", layout="wide")
 
@@ -65,7 +75,7 @@ if 'username' not in st.session_state:
 if 'nav_page' not in st.session_state:
     st.session_state.nav_page = "Dashboard"
 
-# ----------------- GLOBAL MEDICAL & MEDICINE STRIPS THEME BACKGROUND -----------------
+# ----------------- GLOBAL MEDICAL THEME BACKGROUND -----------------
 st.markdown("""
     <style>
     .stApp {
@@ -122,7 +132,7 @@ else:
 
     if st.sidebar.button("📊 Dashboard", use_container_width=True):
         st.session_state.nav_page = "Dashboard"
-    if st.sidebar.button("🌿 Add New Patient", use_container_width=True):
+    if st.sidebar.button("🌿 Add Patient & Quick Check", use_container_width=True):
         st.session_state.nav_page = "Add Patient"
     if st.sidebar.button("📋 Billing & WhatsApp Bill", use_container_width=True):
         st.session_state.nav_page = "Billing"
@@ -155,7 +165,7 @@ else:
         c2.metric("Total Bills Issued", total_bills)
         c3.metric("Total Revenue (₹)", f"₹ {total_revenue:.2f}")
 
-    # 2. ADD NEW PATIENT (CASE-TAKING)
+    # 2. ADD NEW PATIENT & QUICK CHECK OPTION JUST BELOW IT
     elif page == "Add Patient":
         st.markdown("### 🌿 Pro Homeopathic Patient Case-Taking & Registration")
         with st.form("patient_form"):
@@ -190,7 +200,32 @@ else:
                 else:
                     st.error("Please enter Name and Mobile Number.")
 
-    # 3. BILLING & WHATSAPP INTEGRATION & PDF PRINT
+        st.markdown("---")
+        st.markdown("### 🔍 Quick Patient Record Check (Instant Lookup)")
+        quick_query = st.text_input("Enter Patient Name or Mobile Number to Check History instantly")
+        if quick_query:
+            cursor.execute("SELECT id, name, age, gender, phone, address, treatment_history, complaints, thermal, modalities, created_at FROM patients WHERE name LIKE ? OR phone LIKE ?", (f"%{quick_query}%", f"%{quick_query}%"))
+            q_patients = cursor.fetchall()
+            if q_patients:
+                for q_row in q_patients:
+                    qp_id, qp_name, qp_age, qp_gender, qp_phone, qp_address, qp_hist, qp_comp, qp_therm, qp_mod, qp_date = q_row
+                    with st.expander(f"👤 Found: {q_row[1]} | 📱 {q_row[4]} | Age: {q_row[2]}"):
+                        st.write(f"**Address:** {qp_address}")
+                        st.write(f"**Treatment History:** {qp_hist}")
+                        st.write(f"**Chief Complaints:** {qp_comp}")
+                        st.write(f"**Thermal / Modalities:** {qp_therm} | {qp_mod}")
+                        st.markdown("#### 💊 Prescriptions & Days Supply History:")
+                        cursor.execute("SELECT bill_date, medicines, days_supply, next_visit_date, total_amount FROM bills WHERE patient_name = ?", (qp_name,))
+                        q_bills = cursor.fetchall()
+                        if q_bills:
+                            for qb in q_bills:
+                                st.success(f"**Date:** {qb[0]} | **Medicines:** {qb[1]} | **Given for:** {qb[2]} Days | **Next Visit:** {qb[3]} | **Paid:** ₹{qb[4]}")
+                        else:
+                            st.info("No prescription bills found for this patient.")
+            else:
+                st.warning("No patient found matching this name or mobile number.")
+
+    # 3. BILLING WITH MULTIPLE MEDICINES & NO AMOUNT IN WHATSAPP
     elif page == "Billing":
         st.markdown("### 📋 Quick Billing & Prescription Counter")
         cursor.execute("SELECT name, phone FROM patients")
@@ -204,51 +239,81 @@ else:
         if not inv_meds:
             inv_meds = ["Arsenic Alb 30", "Nux Vomica 200", "Paracetamol 650"]
 
-        num_items = st.number_input("Number of items", min_value=1, max_value=10, value=1)
-        med_summary = []
-        total_amount = 0.0
+        # Days supply and next visit date selection
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            days_supply = st.number_input("Medicine given for how many days? (Days Supply)", min_value=1, value=10)
+        with col_d2:
+            default_next_visit = datetime.now() + timedelta(days=int(days_supply))
+            next_visit_date = st.date_input("Next Visit Date", value=default_next_visit)
+
+        st.markdown("### 💊 Add Multiple Medicines with Quantity (Drum/Strip Option)")
         
-        for i in range(int(num_items)):
-            cols = st.columns(3)
-            with cols[0]:
-                med_name = st.selectbox(f"Medicine {i+1}", inv_meds, key=f"med_{i}")
-            with cols[1]:
-                qty = st.number_input(f"Qty {i+1}", min_value=1, value=1, key=f"qty_{i}")
-            with cols[2]:
-                price = st.number_input(f"Price (₹) {i+1}", min_value=0.0, value=50.0, key=f"price_{i}")
-            sub = qty * price
-            total_amount += sub
-            med_summary.append(f"{med_name} (Qty: {qty}, ₹{sub})")
+        if 'bill_items' not in st.session_state:
+            st.session_state.bill_items = []
+
+        with st.form("add_med_form"):
+            col_m1, col_m2, col_m3 = st.columns(3)
+            with col_m1:
+                add_med = st.selectbox("Select Medicine", inv_meds)
+            with col_m2:
+                add_qty = st.number_input("Quantity / Units", min_value=1, value=1)
+            with col_m3:
+                add_price = st.number_input("Unit Price (₹)", min_value=0.0, value=50.0)
             
-        st.markdown(f"### Total Amount: ₹ {total_amount:.2f}")
-        
-        if st.button("Save Bill & Generate WhatsApp Link"):
-            if selected_pat != "No Patients Found":
-                p_name_ext = selected_pat.split(" (")[0]
-                p_phone_ext = selected_pat.split(" (")[1].replace(")", "")
-                med_str = " | ".join(med_summary)
-                now = datetime.now().strftime("%Y-%m-%d %H:%M")
-                
-                cursor.execute('''
-                    INSERT INTO bills (patient_name, phone, medicines, total_amount, bill_date)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', (p_name_ext, p_phone_ext, med_str, total_amount, now))
-                conn.commit()
-                st.success("Bill saved successfully!")
-                
-                wa_msg = f"Hello {p_name_ext}, Thanks for visiting the Panwar Clinic. Your total bill amount is ₹{total_amount:.2f}. Get well soon!"
-                wa_url = f"https://wa.me/91{p_phone_ext}?text={urllib.parse.quote(wa_msg)}"
-                st.markdown(f"📲 [Click here to send WhatsApp message to Patient]({wa_url})", unsafe_allow_html=True)
-                
-                st.markdown("---")
-                st.markdown(f"### 🧾 Panwar Homoeopathic Clinic Invoice")
-                st.write(f"**Patient Name:** {p_name_ext}")
-                st.write(f"**Date:** {now}")
-                st.write(f"**Medicines:** {med_str}")
-                st.write(f"**Total Payable:** ₹ {total_amount:.2f}")
-                st.info("💡 Tip: You can press Ctrl+P in your browser to print this bill as PDF!")
-            else:
-                st.error("Please select a valid patient.")
+            add_btn = st.form_submit_button("➕ Add Medicine to List")
+            if add_btn:
+                st.session_state.bill_items.append({"med": add_med, "qty": add_qty, "price": add_price, "sub": add_qty * add_price})
+
+        # Display current added items list
+        if st.session_state.bill_items:
+            st.markdown("#### 📝 Current Added Medicines List:")
+            item_df = pd.DataFrame(st.session_state.bill_items)
+            st.dataframe(item_df, use_container_width=True)
+            
+            total_amount = sum([item["sub"] for item in st.session_state.bill_items])
+            st.markdown(f"### Total Amount: ₹ {total_amount:.2f}")
+
+            if st.button("🗑️ Clear Medicine List"):
+                st.session_state.bill_items = []
+                st.rerun()
+
+            if st.button("Save Bill & Generate WhatsApp Message Link"):
+                if selected_pat != "No Patients Found":
+                    p_name_ext = selected_pat.split(" (")[0]
+                    p_phone_ext = selected_pat.split(" (")[1].replace(")", "")
+                    med_str = " | ".join([f"{it['med']} (Qty: {it['qty']})" for it in st.session_state.bill_items])
+                    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    formatted_next_visit = next_visit_date.strftime("%Y-%m-%d")
+                    
+                    cursor.execute('''
+                        INSERT INTO bills (patient_name, phone, medicines, days_supply, next_visit_date, total_amount, bill_date)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ''', (p_name_ext, p_phone_ext, med_str, days_supply, formatted_next_visit, total_amount, now))
+                    conn.commit()
+                    st.success("Bill saved successfully!")
+                    
+                    # WhatsApp message without amount, featuring next visit date
+                    wa_msg = f"Hello {p_name_ext}, Thanks for visiting Panwar Homoeopathic Clinic. Your next visit date is {formatted_next_visit}. Get well soon!"
+                    wa_url = f"https://wa.me/91{p_phone_ext}?text={urllib.parse.quote(wa_msg)}"
+                    st.markdown(f"📲 [Click here to send WhatsApp message to Patient]({wa_url})", unsafe_allow_html=True)
+                    
+                    st.markdown("---")
+                    st.markdown(f"### 🧾 Panwar Homoeopathic Clinic Invoice")
+                    st.write(f"**Patient Name:** {p_name_ext}")
+                    st.write(f"**Date:** {now}")
+                    st.write(f"**Medicines Given for:** {days_supply} Days")
+                    st.write(f"**Next Visit Date:** {formatted_next_visit}")
+                    st.write(f"**Medicines:** {med_str}")
+                    st.write(f"**Total Payable:** ₹ {total_amount:.2f}")
+                    st.info("💡 Tip: You can press Ctrl+P in your browser to print this bill as PDF!")
+                    
+                    # Clear session items after save
+                    st.session_state.bill_items = []
+                else:
+                    st.error("Please select a valid patient.")
+        else:
+            st.info("No medicines added yet. Use the form above to add items.")
 
     # 4. AMEND / EDIT BILLS
     elif page == "Amend Bills":
@@ -261,18 +326,19 @@ else:
             selected_b = st.selectbox("Select Bill to Edit", bill_opts)
             b_id = int(selected_b.split(" | ")[0].replace("Bill ID: ", ""))
             
-            cursor.execute("SELECT patient_name, phone, medicines, total_amount FROM bills WHERE id = ?", (b_id,))
+            cursor.execute("SELECT patient_name, phone, medicines, days_supply, next_visit_date, total_amount FROM bills WHERE id = ?", (b_id,))
             b_info = cursor.fetchone()
             
             with st.form("amend_form"):
                 new_p_name = st.text_input("Patient Name", value=b_info[0])
                 new_phone = st.text_input("Phone", value=b_info[1])
                 new_meds = st.text_area("Medicines Details", value=b_info[2])
-                new_amt = st.number_input("Total Amount", value=b_info[3])
+                new_days = st.number_input("Days Supply", value=b_info[3] if b_info[3] else 10)
+                new_amt = st.number_input("Total Amount", value=b_info[5])
                 
                 if st.form_submit_button("Update / Amend Bill"):
-                    cursor.execute("UPDATE bills SET patient_name=?, phone=?, medicines=?, total_amount=? WHERE id=?", 
-                                   (new_p_name, new_phone, new_meds, new_amt, b_id))
+                    cursor.execute("UPDATE bills SET patient_name=?, phone=?, medicines=?, days_supply=?, total_amount=? WHERE id=?", 
+                                   (new_p_name, new_phone, new_meds, new_days, new_amt, b_id))
                     conn.commit()
                     st.success("Bill successfully amended!")
         else:
@@ -337,12 +403,12 @@ else:
                     st.write(f"**Thermal Reaction:** {p_therm}")
                     st.write(f"**Modalities:** {p_mod}")
                     st.markdown("---")
-                    st.markdown("#### 💊 Previous Bills & Prescriptions Given:")
-                    cursor.execute("SELECT bill_date, medicines, total_amount FROM bills WHERE patient_name = ?", (p_name,))
+                    st.markdown("#### 💊 Previous Bills, Days Supply & Prescriptions:")
+                    cursor.execute("SELECT bill_date, medicines, days_supply, next_visit_date, total_amount FROM bills WHERE patient_name = ?", (p_name,))
                     bills = cursor.fetchall()
                     if bills:
                         for idx, b in enumerate(bills, 1):
-                            st.success(f"**Visit {idx} ({b[0]}):** {b[1]} — **Paid: ₹ {b[2]}**")
+                            st.success(f"**Visit {idx} ({b[0]}):** {b[1]} | **Given for:** {b[2]} Days | **Next Visit:** {b[3]} — **Paid: ₹{b[4]}**")
                     else:
                         st.info("No past bills found.")
         else:
