@@ -65,10 +65,23 @@ if 'username' not in st.session_state:
 if 'nav_page' not in st.session_state:
     st.session_state.nav_page = "Dashboard"
 
+# ----------------- GLOBAL MEDICAL & MEDICINE STRIPS THEME BACKGROUND -----------------
+st.markdown("""
+    <style>
+    .stApp {
+        background: linear-gradient(135deg, rgba(240, 247, 244, 0.92) 0%, rgba(232, 245, 233, 0.92) 100%), 
+                          url('https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?q=80&w=1920&auto=format&fit=crop');
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # ----------------- AUTHENTICATION SYSTEM -----------------
 if not st.session_state.logged_in:
-    st.markdown("<h1 style='text-align: center; color: #2E7D32;'>🌿 Panwar Homoeopathic Clinic & Pharmacy</h1>", unsafe_allow_html=True)
-    st.markdown("<h4 style='text-align: center; color: #555;'>Advanced Digital Management & Prescription Portal</h4>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #1b5e20;'>🌿 Panwar Homoeopathic Clinic & Pharmacy</h1>", unsafe_allow_html=True)
+    st.markdown("<h4 style='text-align: center; color: #2e7d32;'>Advanced Digital Management & Prescription Portal</h4>", unsafe_allow_html=True)
     
     tab1, tab2 = st.tabs(["🔐 Secure Login", "📝 Register New User"])
     
@@ -293,7 +306,7 @@ else:
         else:
             st.info("Inventory is empty.")
 
-    # 6. PATIENT HISTORY & TRACKING (Safely handled with safe index checking)
+    # 6. PATIENT HISTORY & TRACKING
     elif page == "History":
         st.markdown("### 📂 Patient Medical History & Tracking")
         search_q = st.text_input("🔍 Search Patient by Name or Mobile")
